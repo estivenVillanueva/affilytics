@@ -1,0 +1,92 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Note that some adapters may set a maximum length for the String type by default, please ensure your strings are long
+// enough when changing adapters.
+// See https://www.prisma.io/docs/orm/reference/prisma-schema-reference#string for more information
+datasource db {
+  provider = "sqlite"
+  url      = "file:dev.sqlite"
+}
+
+model Session {
+  id            String    @id
+  shop          String
+  state         String
+  isOnline      Boolean   @default(false)
+  scope         String?
+  expires       DateTime?
+  accessToken   String
+  userId        BigInt?
+  firstName     String?
+  lastName      String?
+  email         String?
+  accountOwner  Boolean   @default(false)
+  locale        String?
+  collaborator  Boolean?  @default(false)
+  emailVerified Boolean?  @default(false)
+  refreshToken        String?
+  refreshTokenExpires DateTime?
+}
+
+model Affiliate {
+  id             String     @id @default(cuid())
+  code           String
+  shop           String
+  commissionRate Float
+  createdAt      DateTime   @default(now())
+  referrals      Referral[]
+  campaigns      Campaign[]
+
+  @@index([shop])
+  @@unique([shop, code])
+}
+
+model Campaign {
+  id          String    @id @default(cuid())
+  shop        String
+  name        String
+  slug        String
+  affiliateId String
+  active      Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  affiliate   Affiliate @relation(fields: [affiliateId], references: [id], onDelete: Cascade)
+  referrals   Referral[]
+
+  @@unique([shop, slug])
+  @@index([shop])
+  @@index([affiliateId])
+}
+
+model Referral {
+  id                    String    @id @default(cuid())
+  affiliateId         String
+  campaignId          String?
+  orderId             String
+  shop                String
+  orderAmount         Float
+  commissionAmount    Float
+  appServiceFeeAmount Float     @default(0)
+  affiliatePayoutAmount Float @default(0)
+  billingStatus       String    @default("FAILED")
+  conversionReport    String?
+  createdAt           DateTime  @default(now())
+  affiliate           Affiliate @relation(fields: [affiliateId], references: [id], onDelete: Cascade)
+  campaign            Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+
+  @@index([affiliateId])
+  @@index([shop])
+  @@index([campaignId])
+  @@unique([shop, orderId])
+}
+
+model Shop {
+  id        String   @id
+  plan      String?
+  createdAt DateTime @default(now())
+}

@@ -1,0 +1,25 @@
+name = "affiliate-pixel"
+type = "web_pixel_extension"
+uid = "a8c27daf-4a0c-7bd4-96a0-311fb5cad2fe91eb4372"
+
+runtime_context = "strict"
+
+[settings]
+type = "object"
+
+[settings.fields.conversionApiUrl]
+name = "Conversion API URL"
+description = "Full URL to POST conversions, e.g. https://your-app.example.com/api/conversion"
+type = "single_line_text_field"
+validations = [{ name = "min", value = "8" }]
+
+[settings.fields.conversionSharedSecret]
+name = "Signing secret"
+description = "Must match CONVERSION_WEBHOOK_SECRET in the app server environment"
+type = "single_line_text_field"
+validations = [{ name = "min", value = "16" }]
+
+[settings.fields.conversionApiKey]
+name = "Optional API key"
+description = "If set, must match CONVERSION_API_KEY on the server and be sent as x-api-key"
+type = "single_line_text_field"

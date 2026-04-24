@@ -1,0 +1,10 @@
+{% assign _affiliate_tracker_src = 'affiliate-tracker.js' | asset_url %}
+<script src="{{ _affiliate_tracker_src }}" defer></script>
+
+{% schema %}
+{
+  "name": "Affiliate Tracker",
+  "target": "body"
+}
+{% endschema %}
+

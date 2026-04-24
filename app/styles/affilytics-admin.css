@@ -1,0 +1,643 @@
+/**
+
+ * Affilytics — Admin shell (Polaris-aligned spacing, no dependency on @shopify/polaris CSS).
+
+ * Lives outside app/routes so react-router route-exports does not parse this file as a route.
+
+ */
+
+
+
+.affilytics-shell {
+
+  max-width: 1024px;
+
+  margin: 0 auto;
+
+  padding: 0 1.25rem 3rem;
+
+  box-sizing: border-box;
+
+}
+
+
+
+.affilytics-page-head {
+
+  margin-bottom: 1.25rem;
+
+}
+
+
+
+.affilytics-page-title {
+
+  font-size: 1.25rem;
+
+  font-weight: 650;
+
+  letter-spacing: -0.02em;
+
+  color: #202223;
+
+  margin: 0 0 0.25rem;
+
+}
+
+
+
+.affilytics-page-sub {
+
+  margin: 0;
+
+  font-size: 0.875rem;
+
+  line-height: 1.4;
+
+  color: #6d7175;
+
+}
+
+
+
+/* Toolbar (date range, etc.) */
+
+.affilytics-toolbar {
+
+  display: flex;
+
+  flex-wrap: wrap;
+
+  align-items: center;
+
+  justify-content: space-between;
+
+  gap: 1rem;
+
+  margin-bottom: 0.25rem;
+
+}
+
+
+
+.affilytics-toolbar-label {
+
+  font-size: 0.8125rem;
+
+  font-weight: 600;
+
+  color: #202223;
+
+}
+
+
+
+.affilytics-segmented {
+
+  display: inline-flex;
+
+  padding: 3px;
+
+  background: #e4e5e7;
+
+  border-radius: 10px;
+
+  gap: 2px;
+
+}
+
+
+
+.affilytics-segmented a {
+
+  text-decoration: none;
+
+  font-size: 0.8125rem;
+
+  font-weight: 500;
+
+  padding: 0.45rem 0.85rem;
+
+  border-radius: 8px;
+
+  color: #202223;
+
+  border: none;
+
+  background: transparent;
+
+  transition: background 0.12s ease, color 0.12s ease;
+
+}
+
+
+
+.affilytics-segmented a:hover {
+
+  background: rgba(255, 255, 255, 0.55);
+
+}
+
+
+
+.affilytics-segmented a.active {
+
+  background: #fff;
+
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+
+  color: #202223;
+
+}
+
+
+
+/* KPI grid */
+
+.affilytics-kpi-grid {
+
+  display: grid;
+
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+
+  gap: 1rem;
+
+  margin-top: 0.5rem;
+
+}
+
+
+
+.affilytics-kpi-card {
+
+  position: relative;
+
+  background: #fff;
+
+  border: 1px solid #e3e3e3;
+
+  border-radius: 12px;
+
+  padding: 1rem 1rem 1rem 1.1rem;
+
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 1px 3px rgba(0, 0, 0, 0.03);
+
+  overflow: hidden;
+
+}
+
+
+
+.affilytics-kpi-card::before {
+
+  content: "";
+
+  position: absolute;
+
+  left: 0;
+
+  top: 0;
+
+  bottom: 0;
+
+  width: 4px;
+
+  border-radius: 12px 0 0 12px;
+
+}
+
+
+
+.affilytics-kpi-card--sales::before {
+
+  background: #008060;
+
+}
+
+
+
+.affilytics-kpi-card--app::before {
+
+  background: #7c3aed;
+
+}
+
+
+
+.affilytics-kpi-card--aff::before {
+
+  background: #2c6ecb;
+
+}
+
+
+
+.affilytics-kpi-label {
+
+  font-size: 0.75rem;
+
+  font-weight: 600;
+
+  text-transform: uppercase;
+
+  letter-spacing: 0.04em;
+
+  color: #6d7175;
+
+  margin: 0 0 0.35rem;
+
+}
+
+
+
+.affilytics-kpi-value {
+
+  font-size: 1.375rem;
+
+  font-weight: 650;
+
+  letter-spacing: -0.03em;
+
+  color: #202223;
+
+  margin: 0;
+
+  font-variant-numeric: tabular-nums;
+
+}
+
+
+
+.affilytics-kpi-foot {
+
+  margin: 0.5rem 0 0;
+
+  font-size: 0.75rem;
+
+  color: #8c9196;
+
+}
+
+
+
+/* Callouts */
+
+.affilytics-callout {
+
+  display: flex;
+
+  gap: 0.75rem;
+
+  align-items: flex-start;
+
+  padding: 0.9rem 1rem;
+
+  border-radius: 10px;
+
+  margin-top: 1rem;
+
+  font-size: 0.875rem;
+
+  line-height: 1.45;
+
+}
+
+
+
+.affilytics-callout--info {
+
+  background: #e0f0ff;
+
+  border: 1px solid #b4dafe;
+
+  color: #084298;
+
+}
+
+
+
+.affilytics-callout--muted {
+
+  background: #f6f6f7;
+
+  border: 1px solid #e3e3e3;
+
+  color: #444;
+
+}
+
+
+
+.affilytics-callout-icon {
+
+  flex-shrink: 0;
+
+  width: 2.25rem;
+
+  height: 2.25rem;
+
+  border-radius: 8px;
+
+  background: rgba(255, 255, 255, 0.85);
+
+  display: flex;
+
+  align-items: center;
+
+  justify-content: center;
+
+  color: #5c5f62;
+
+}
+
+.affilytics-callout-icon svg {
+
+  width: 1.125rem;
+
+  height: 1.125rem;
+
+  flex-shrink: 0;
+
+}
+
+.affilytics-callout--info .affilytics-callout-icon {
+
+  color: #084298;
+
+  background: rgba(255, 255, 255, 0.95);
+
+}
+
+.affilytics-callout--muted .affilytics-callout-icon {
+
+  color: #5c5f62;
+
+  background: #fff;
+
+  border: 1px solid #e3e3e3;
+
+}
+
+
+
+.affilytics-callout-body strong {
+
+  display: block;
+
+  margin-bottom: 0.2rem;
+
+  color: inherit;
+
+}
+
+
+
+/* Forms */
+
+.affilytics-form-card {
+
+  max-width: 520px;
+
+}
+
+
+
+.affilytics-form-grid-2 {
+
+  display: grid;
+
+  grid-template-columns: 1fr minmax(100px, 140px);
+
+  gap: 1rem;
+
+}
+
+
+
+@media (max-width: 520px) {
+
+  .affilytics-form-grid-2 {
+
+    grid-template-columns: 1fr;
+
+  }
+
+}
+
+
+
+.affilytics-field-hint {
+
+  font-size: 0.75rem;
+
+  color: #6d7175;
+
+  margin-top: 0.35rem;
+
+}
+
+
+
+.affilytics-inline-actions {
+
+  display: flex;
+
+  flex-wrap: wrap;
+
+  gap: 0.5rem;
+
+  align-items: center;
+
+  margin-top: 0.25rem;
+
+}
+
+
+
+/* Tables */
+
+.affilytics-table-wrap {
+
+  overflow-x: auto;
+
+  border: 1px solid #e3e3e3;
+
+  border-radius: 10px;
+
+  background: #fff;
+
+}
+
+
+
+.affilytics-table {
+
+  width: 100%;
+
+  border-collapse: collapse;
+
+  font-size: 0.875rem;
+
+}
+
+
+
+.affilytics-table thead th {
+
+  text-align: left;
+
+  padding: 0.65rem 1rem;
+
+  background: #f6f6f7;
+
+  color: #444;
+
+  font-weight: 600;
+
+  font-size: 0.75rem;
+
+  text-transform: uppercase;
+
+  letter-spacing: 0.03em;
+
+  border-bottom: 1px solid #e3e3e3;
+
+}
+
+
+
+.affilytics-table tbody td {
+
+  padding: 0.75rem 1rem;
+
+  border-bottom: 1px solid #ececec;
+
+  vertical-align: middle;
+
+}
+
+
+
+.affilytics-table tbody tr:last-child td {
+
+  border-bottom: none;
+
+}
+
+
+
+.affilytics-table tbody tr:hover td {
+
+  background: #fafbfb;
+
+}
+
+
+
+.affilytics-code {
+
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  font-size: 0.8125rem;
+
+  background: #f1f2f4;
+
+  padding: 0.15rem 0.4rem;
+
+  border-radius: 4px;
+
+}
+
+
+
+/* Copy input row */
+
+.affilytics-copy-row {
+
+  display: flex;
+
+  gap: 0.5rem;
+
+  flex-wrap: wrap;
+
+  align-items: stretch;
+
+  margin-top: 0.5rem;
+
+}
+
+
+
+.affilytics-copy-row input {
+
+  flex: 1;
+
+  min-width: 200px;
+
+  padding: 0.5rem 0.65rem;
+
+  font-size: 0.8125rem;
+
+  border: 1px solid #c9cccf;
+
+  border-radius: 8px;
+
+  font-family: ui-monospace, monospace;
+
+  background: #fafbfb;
+
+}
+
+
+
+.affilytics-btn-secondary {
+
+  cursor: pointer;
+
+  padding: 0.5rem 0.9rem;
+
+  font-size: 0.8125rem;
+
+  font-weight: 600;
+
+  border-radius: 8px;
+
+  border: 1px solid #c9cccf;
+
+  background: #fff;
+
+  color: #202223;
+
+}
+
+
+
+.affilytics-btn-secondary:hover {
+
+  background: #f6f6f7;
+
+}
+
+
+
+.affilytics-link-inline {
+
+  font-size: 0.875rem;
+
+  font-weight: 600;
+
+  color: #2c6ecb;
+
+  text-decoration: none;
+
+}
+
+
+
+.affilytics-link-inline:hover {
+
+  text-decoration: underline;
+
+}
+
+
