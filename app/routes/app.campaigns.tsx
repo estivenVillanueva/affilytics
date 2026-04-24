@@ -1,5 +1,5 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { Form, useActionData, useLoaderData } from "react-router";
+import { Form, useActionData, useFetcher, useLoaderData } from "react-router";
 import {
   Badge,
   Banner,
@@ -8,25 +8,22 @@ import {
   Button,
   Card,
   FormLayout,
-  IndexTable,
   InlineStack,
   Link,
   Page,
   Text,
   TextField,
 } from "@shopify/polaris";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import prisma from "../db.server";
 import {
   createCampaign,
   deleteCampaign,
-  findCampaignById,
   findCampaignBySlugAny,
-  findCampaignBySlugExcept,
   getCampaigns,
   isUniqueConstraintError,
   isValidCampaignSlug,
   normalizeCampaignSlug,
-  updateCampaign,
 } from "../models/campaign.server";
 import { findAffiliateById, getAffiliates } from "../models/affiliate.server";
 import { authenticate } from "../shopify.server";
@@ -34,8 +31,8 @@ import { authenticate } from "../shopify.server";
 type LoaderData = {
   campaigns: Awaited<ReturnType<typeof getCampaigns>>;
   affiliates: Awaited<ReturnType<typeof getAffiliates>>;
-  editing: Awaited<ReturnType<typeof findCampaignById>>;
   storefrontOrigin: string | null;
+  shopDomain: string;
 };
 
 async function fetchStorefrontOrigin(
@@ -66,22 +63,17 @@ async function fetchStorefrontOrigin(
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, admin } = await authenticate.admin(request);
-  const url = new URL(request.url);
-  const editId = url.searchParams.get("edit");
-  const [campaigns, affiliates, storefrontOrigin, editing] = await Promise.all([
+  const [campaigns, affiliates, storefrontOrigin] = await Promise.all([
     getCampaigns(session.shop),
     getAffiliates(session.shop),
     fetchStorefrontOrigin(admin),
-    editId?.trim()
-      ? findCampaignById(editId.trim(), session.shop)
-      : Promise.resolve(null),
   ]);
 
   return {
     campaigns,
     affiliates,
     storefrontOrigin,
-    editing,
+    shopDomain: session.shop,
   } satisfies LoaderData;
 };
 
@@ -128,49 +120,33 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     errors.slug =
       "Slug inválido. Usa minúsculas, números y guiones (ej. black-friday-2026).";
   }
-  if (!affiliateId) {
-    errors.affiliateId = "Selecciona un afiliado.";
-  }
-
   const slug = normalizeCampaignSlug(slugRaw);
-
-  const affiliate = affiliateId
-    ? await findAffiliateById(affiliateId, session.shop)
-    : null;
-  if (affiliateId && !affiliate) {
-    errors.affiliateId = "Afiliado no válido para esta tienda.";
-  }
-
-  if (Object.keys(errors).length > 0) {
-    return { errors } satisfies ActionData;
-  }
 
   if (intent === "update") {
     const id = String(formData.get("id") ?? "").trim();
     if (!id) {
       return { errors: { form: "Identificador inválido." } } satisfies ActionData;
     }
-    const active = formData.get("active") === "on";
-    const other = await findCampaignBySlugExcept(slug, session.shop, id);
-    if (other) {
-      return {
-        errors: { slug: "Ese slug ya existe. Usa otro." },
-      } satisfies ActionData;
+    if (Object.keys(errors).length > 0) {
+      return { errors } satisfies ActionData;
     }
     try {
-      const row = await updateCampaign({
-        id,
-        shop: session.shop,
-        name,
-        slug,
-        affiliateId: affiliate!.id,
-        active,
+      await prisma.campaign.update({
+        where: { id },
+        data: {
+          name,
+          slug,
+        },
       });
-      if (!row) {
+      return { success: true } satisfies ActionData;
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        "code" in error &&
+        (error as { code?: string }).code === "P2025"
+      ) {
         return { errors: { form: "No se encontró la campaña." } } satisfies ActionData;
       }
-      return { success: true, updated: true } satisfies ActionData;
-    } catch (error) {
       if (isUniqueConstraintError(error)) {
         return {
           errors: { slug: "Ese slug ya existe. Usa otro." },
@@ -180,6 +156,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         errors: { form: "No se pudo actualizar la campaña." },
       } satisfies ActionData;
     }
+  }
+
+  if (!affiliateId) {
+    errors.affiliateId = "Selecciona un afiliado.";
+  }
+  const affiliate = affiliateId
+    ? await findAffiliateById(affiliateId, session.shop)
+    : null;
+  if (affiliateId && !affiliate) {
+    errors.affiliateId = "Afiliado no válido para esta tienda.";
+  }
+  if (Object.keys(errors).length > 0) {
+    return { errors } satisfies ActionData;
   }
 
   const dupCreate = await findCampaignBySlugAny(slug, session.shop);
@@ -209,97 +198,191 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 };
 
-function SuggestedTrackingUrl({
-  origin,
-  code,
-  slug,
-}: {
-  origin: string | null;
-  code: string;
-  slug: string;
-}) {
-  const [copied, setCopied] = useState(false);
-  const suffix = `?ref=${encodeURIComponent(code)}&c=${encodeURIComponent(slug)}`;
-  const full = origin ? `${origin}${suffix}` : suffix;
-
-  return (
-    <BlockStack gap="200">
-      <Text as="p" variant="bodySm" tone="subdued">
-        Enlace de tracking:
-      </Text>
-      <InlineStack gap="200">
-        <Box width="100%">
-          <TextField label="URL" labelHidden value={full} autoComplete="off" readOnly />
-        </Box>
-        <Button
-          onClick={async () => {
-            try {
-              await navigator.clipboard.writeText(full);
-              setCopied(true);
-              setTimeout(() => setCopied(false), 2000);
-            } catch {
-              setCopied(false);
-            }
-          }}
-        >
-          Copiar
-        </Button>
-      </InlineStack>
-      {copied ? (
-        <Text as="p" variant="bodySm" tone="success">
-          Copiado al portapapeles.
-        </Text>
-      ) : null}
-    </BlockStack>
-  );
-}
-
 export default function CampaignsPage() {
-  const { campaigns, affiliates, storefrontOrigin, editing } =
-    useLoaderData<typeof loader>();
+  const { campaigns, affiliates, shopDomain } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
+  const updateFetcher = useFetcher<typeof action>();
   const noAffiliates = affiliates.length === 0;
 
-  const [nameValue, setNameValue] = useState(editing?.name ?? "");
-  const [slugValue, setSlugValue] = useState(editing?.slug ?? "");
+  const [nameValue, setNameValue] = useState("");
+  const [slugValue, setSlugValue] = useState("");
+  const [createFormKey, setCreateFormKey] = useState(0);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editSlug, setEditSlug] = useState("");
+
+  useEffect(() => {
+    if (
+      actionData?.success &&
+      !actionData?.errors &&
+      !actionData?.deleted
+    ) {
+      setNameValue("");
+      setSlugValue("");
+      setCreateFormKey((prev) => prev + 1);
+    }
+  }, [actionData]);
+
+  useEffect(() => {
+    if (updateFetcher.state === "idle" && updateFetcher.data?.success) {
+      setEditingId(null);
+      setEditName("");
+      setEditSlug("");
+    }
+  }, [updateFetcher.state, updateFetcher.data]);
 
   const rows = useMemo(
     () =>
-      campaigns.map((campaign, index) => (
-        <IndexTable.Row
-          key={campaign.id}
-          id={campaign.id}
-          position={index}
-          selected={false}
-        >
-          <IndexTable.Cell>{campaign.name}</IndexTable.Cell>
-          <IndexTable.Cell>{campaign.slug}</IndexTable.Cell>
-          <IndexTable.Cell>{campaign.affiliate.code}</IndexTable.Cell>
-          <IndexTable.Cell>
-            <Badge tone={campaign.active ? "success" : "info"}>
-              {campaign.active ? "Activa" : "Inactiva"}
-            </Badge>
-          </IndexTable.Cell>
-          <IndexTable.Cell>
-            <InlineStack gap="200">
-              <Button
-                url={`/app/campaigns?edit=${encodeURIComponent(campaign.id)}`}
-                variant="secondary"
-              >
-                Editar
-              </Button>
-              <Form method="post">
-                <input type="hidden" name="_intent" value="delete" />
-                <input type="hidden" name="id" value={campaign.id} />
-                <Button submit variant="tertiary" tone="critical">
-                  Eliminar
-                </Button>
-              </Form>
-            </InlineStack>
-          </IndexTable.Cell>
-        </IndexTable.Row>
-      )),
-    [campaigns],
+      campaigns.map((campaign) => {
+        const isEditing = editingId === campaign.id;
+        const trackingUrl = `https://${shopDomain}/?ref=${encodeURIComponent(campaign.affiliate.code)}&c=${encodeURIComponent(campaign.slug)}`;
+        return (
+          <tr key={campaign.id}>
+            <td
+              style={{
+                padding: 12,
+                borderBottom: "1px solid #e1e3e5",
+                verticalAlign: "middle",
+              }}
+            >
+              {isEditing ? (
+                <TextField
+                  label="Nombre"
+                  labelHidden
+                  value={editName}
+                  onChange={setEditName}
+                  autoComplete="off"
+                />
+              ) : (
+                campaign.name
+              )}
+            </td>
+            <td
+              style={{
+                padding: 12,
+                borderBottom: "1px solid #e1e3e5",
+                verticalAlign: "middle",
+              }}
+            >
+              {isEditing ? (
+                <TextField
+                  label="Slug"
+                  labelHidden
+                  value={editSlug}
+                  onChange={setEditSlug}
+                  autoComplete="off"
+                />
+              ) : (
+                campaign.slug
+              )}
+            </td>
+            <td
+              style={{
+                padding: 12,
+                borderBottom: "1px solid #e1e3e5",
+                verticalAlign: "middle",
+              }}
+            >
+              {campaign.affiliate.code}
+            </td>
+            <td
+              style={{
+                padding: 12,
+                borderBottom: "1px solid #e1e3e5",
+                verticalAlign: "middle",
+              }}
+            >
+              <Badge tone={campaign.active ? "success" : "info"}>
+                {campaign.active ? "Activa" : "Inactiva"}
+              </Badge>
+            </td>
+            <td
+              style={{
+                padding: 12,
+                borderBottom: "1px solid #e1e3e5",
+                verticalAlign: "middle",
+              }}
+            >
+              <BlockStack gap="100">
+                <Text as="p" variant="bodySm" tone="subdued">
+                  {trackingUrl}
+                </Text>
+                <InlineStack>
+                  <Button
+                    variant="plain"
+                    onClick={() => {
+                      void navigator.clipboard.writeText(trackingUrl);
+                    }}
+                  >
+                    Copiar
+                  </Button>
+                </InlineStack>
+              </BlockStack>
+            </td>
+            <td
+              style={{
+                padding: 12,
+                borderBottom: "1px solid #e1e3e5",
+                verticalAlign: "middle",
+              }}
+            >
+              <InlineStack gap="200">
+                {isEditing ? (
+                  <>
+                    <Button
+                      variant="primary"
+                      loading={updateFetcher.state !== "idle"}
+                      onClick={() => {
+                        updateFetcher.submit(
+                          {
+                            _intent: "update",
+                            id: campaign.id,
+                            name: editName,
+                            slug: editSlug,
+                            affiliateId: campaign.affiliateId,
+                          },
+                          { method: "post" },
+                        );
+                      }}
+                    >
+                      Guardar
+                    </Button>
+                    <Button
+                      variant="plain"
+                      onClick={() => {
+                        setEditingId(null);
+                        setEditName("");
+                        setEditSlug("");
+                      }}
+                    >
+                      Cancelar
+                    </Button>
+                  </>
+                ) : (
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      setEditingId(campaign.id);
+                      setEditName(campaign.name);
+                      setEditSlug(campaign.slug);
+                    }}
+                  >
+                    Editar
+                  </Button>
+                )}
+                <Form method="post">
+                  <input type="hidden" name="_intent" value="delete" />
+                  <input type="hidden" name="id" value={campaign.id} />
+                  <Button submit variant="tertiary" tone="critical">
+                    Eliminar
+                  </Button>
+                </Form>
+              </InlineStack>
+            </td>
+          </tr>
+        );
+      }),
+    [campaigns, editingId, editName, editSlug, shopDomain, updateFetcher],
   );
 
   return (
@@ -322,7 +405,7 @@ export default function CampaignsPage() {
         <Card>
           <Box padding="400">
             <Text variant="headingMd" as="h3">
-              {editing ? "Editar campaña" : "Nueva campaña"}
+              Nueva campaña
             </Text>
             <Box paddingBlockStart="300">
               {noAffiliates ? (
@@ -330,15 +413,8 @@ export default function CampaignsPage() {
                   <Link url="/app/affiliates">Ir a Afiliados →</Link>
                 </Banner>
               ) : (
-                <Form method="post" key={editing?.id ?? "create"}>
-                  <input
-                    type="hidden"
-                    name="_intent"
-                    value={editing ? "update" : "create"}
-                  />
-                  {editing ? (
-                    <input type="hidden" name="id" value={editing.id} />
-                  ) : null}
+                <Form method="post" key={`create-${createFormKey}`}>
+                  <input type="hidden" name="_intent" value="create" />
                   <FormLayout>
                     <TextField
                       label="Nombre"
@@ -363,7 +439,7 @@ export default function CampaignsPage() {
                       </Text>
                       <select
                         name="affiliateId"
-                        defaultValue={editing?.affiliateId ?? ""}
+                        defaultValue=""
                         style={{
                           width: "100%",
                           marginTop: 8,
@@ -380,17 +456,6 @@ export default function CampaignsPage() {
                         ))}
                       </select>
                     </div>
-                    {editing ? (
-                      <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                        <input
-                          type="checkbox"
-                          name="active"
-                          value="on"
-                          defaultChecked={editing.active}
-                        />
-                        Campaña activa
-                      </label>
-                    ) : null}
                     {actionData?.errors?.affiliateId ? (
                       <Text as="p" variant="bodyMd" tone="critical">
                         {actionData.errors.affiliateId}
@@ -401,21 +466,9 @@ export default function CampaignsPage() {
                         {actionData.errors.form}
                       </Text>
                     ) : null}
-                    {editing ? (
-                      <SuggestedTrackingUrl
-                        origin={storefrontOrigin}
-                        code={editing.affiliate.code}
-                        slug={editing.slug}
-                      />
-                    ) : null}
                     <InlineStack align="end" gap="200">
-                      {editing ? (
-                        <Button variant="tertiary" url="/app/campaigns">
-                          Cancelar
-                        </Button>
-                      ) : null}
                       <Button submit variant="primary">
-                        {editing ? "Guardar cambios" : "Crear campaña"}
+                        Crear campaña
                       </Button>
                     </InlineStack>
                   </FormLayout>
@@ -431,20 +484,78 @@ export default function CampaignsPage() {
               Campañas
             </Text>
             <Box paddingBlockStart="300">
-              <IndexTable
-                itemCount={campaigns.length}
-                selectable={false}
-                resourceName={{ singular: "campaña", plural: "campañas" }}
-                headings={[
-                  { title: "Nombre" },
-                  { title: "Slug" },
-                  { title: "Afiliado" },
-                  { title: "Estado" },
-                  { title: "Acciones" },
-                ]}
+              <table
+                style={{
+                  width: "100%",
+                  borderCollapse: "collapse",
+                }}
               >
-                {rows}
-              </IndexTable>
+                <thead>
+                  <tr>
+                    <th
+                      style={{
+                        padding: 12,
+                        textAlign: "left",
+                        borderBottom: "1px solid #e1e3e5",
+                        fontWeight: 600,
+                      }}
+                    >
+                      Nombre
+                    </th>
+                    <th
+                      style={{
+                        padding: 12,
+                        textAlign: "left",
+                        borderBottom: "1px solid #e1e3e5",
+                        fontWeight: 600,
+                      }}
+                    >
+                      Slug
+                    </th>
+                    <th
+                      style={{
+                        padding: 12,
+                        textAlign: "left",
+                        borderBottom: "1px solid #e1e3e5",
+                        fontWeight: 600,
+                      }}
+                    >
+                      Afiliado
+                    </th>
+                    <th
+                      style={{
+                        padding: 12,
+                        textAlign: "left",
+                        borderBottom: "1px solid #e1e3e5",
+                        fontWeight: 600,
+                      }}
+                    >
+                      Estado
+                    </th>
+                    <th
+                      style={{
+                        padding: 12,
+                        textAlign: "left",
+                        borderBottom: "1px solid #e1e3e5",
+                        fontWeight: 600,
+                      }}
+                    >
+                      Link de campaña
+                    </th>
+                    <th
+                      style={{
+                        padding: 12,
+                        textAlign: "left",
+                        borderBottom: "1px solid #e1e3e5",
+                        fontWeight: 600,
+                      }}
+                    >
+                      Acciones
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>{rows}</tbody>
+              </table>
             </Box>
           </Box>
         </Card>

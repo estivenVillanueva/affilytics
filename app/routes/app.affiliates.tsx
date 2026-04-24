@@ -1,18 +1,19 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { Form, useActionData, useLoaderData } from "react-router";
+import { Form, useActionData, useFetcher, useLoaderData } from "react-router";
 import {
   Box,
   Button,
   Card,
   EmptyState,
   FormLayout,
-  IndexTable,
   InlineStack,
   Page,
   Text,
   TextField,
+  Tooltip,
 } from "@shopify/polaris";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import prisma from "../db.server";
 import {
   createAffiliate,
   deleteAffiliate,
@@ -21,7 +22,6 @@ import {
   findAffiliateById,
   getAffiliates,
   isUniqueConstraintError,
-  updateAffiliate,
 } from "../models/affiliate.server";
 import { authenticate } from "../shopify.server";
 
@@ -46,7 +46,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       ? await findAffiliateById(editId.trim(), session.shop)
       : null;
 
-  return { affiliates, editing };
+  return { affiliates, editing, shopDomain: session.shop };
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -115,19 +115,21 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     try {
-      const row = await updateAffiliate({
-        id,
-        shop: session.shop,
-        code,
-        commissionRate,
+      await prisma.affiliate.update({
+        where: { id },
+        data: { code, commissionRate },
       });
-      if (!row) {
+      return { success: true } satisfies ActionData;
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        "code" in error &&
+        (error as { code?: string }).code === "P2025"
+      ) {
         return {
           errors: { form: "No se encontró el afiliado." },
         } satisfies ActionData;
       }
-      return { success: true, updated: true } satisfies ActionData;
-    } catch (error) {
       if (isUniqueConstraintError(error)) {
         return {
           errors: {
@@ -180,58 +182,184 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function AffiliatesPage() {
-  const { affiliates, editing } = useLoaderData<typeof loader>();
+  const { affiliates, shopDomain } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
+  const updateFetcher = useFetcher<typeof action>();
 
   const [createCode, setCreateCode] = useState("");
   const [createCommission, setCreateCommission] = useState("");
-  const [editCode, setEditCode] = useState(editing?.code ?? "");
-  const [editCommission, setEditCommission] = useState(
-    editing ? String(editing.commissionRate) : "",
-  );
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editCode, setEditCode] = useState("");
+  const [editCommission, setEditCommission] = useState("");
+
+  useEffect(() => {
+    if (actionData && !actionData.errors && actionData.success && !actionData.deleted) {
+      setCreateCode("");
+      setCreateCommission("");
+    }
+  }, [actionData]);
+
+  useEffect(() => {
+    if (updateFetcher.state === "idle" && updateFetcher.data?.success) {
+      setEditingId(null);
+      setEditCode("");
+      setEditCommission("");
+    }
+  }, [updateFetcher.state, updateFetcher.data]);
 
   const rows = useMemo(
     () =>
-      affiliates.map((affiliate, index) => (
-        <IndexTable.Row
-          id={affiliate.id}
-          key={affiliate.id}
-          position={index}
-          selected={false}
-        >
-          <IndexTable.Cell>
-            <Text as="span" variant="bodyMd" fontWeight="semibold">
-              {affiliate.code}
-            </Text>
-          </IndexTable.Cell>
-          <IndexTable.Cell>{affiliate.commissionRate}%</IndexTable.Cell>
-          <IndexTable.Cell>
-            {new Date(affiliate.createdAt).toLocaleDateString("es", {
-              day: "numeric",
-              month: "short",
-              year: "numeric",
-            })}
-          </IndexTable.Cell>
-          <IndexTable.Cell>
-            <InlineStack gap="200">
-              <Button
-                url={`/app/affiliates?edit=${encodeURIComponent(affiliate.id)}`}
-                variant="secondary"
-              >
-                Editar
-              </Button>
-              <Form method="post">
-                <input type="hidden" name="_intent" value="delete" />
-                <input type="hidden" name="id" value={affiliate.id} />
-                <Button submit variant="tertiary" tone="critical">
-                  Eliminar
-                </Button>
-              </Form>
-            </InlineStack>
-          </IndexTable.Cell>
-        </IndexTable.Row>
-      )),
-    [affiliates],
+      affiliates.map((affiliate) => {
+        const trackingUrl = `https://${shopDomain}/?ref=${encodeURIComponent(affiliate.code)}`;
+        const isEditing = editingId === affiliate.id;
+        return (
+          <tr key={affiliate.id}>
+            <td
+              style={{
+                padding: 12,
+                borderBottom: "1px solid #e1e3e5",
+                verticalAlign: "middle",
+              }}
+            >
+              {isEditing ? (
+                <TextField
+                  label="Código"
+                  labelHidden
+                  value={editCode}
+                  onChange={setEditCode}
+                  autoComplete="off"
+                />
+              ) : (
+                <Text as="span" variant="bodyMd" fontWeight="semibold">
+                  {affiliate.code}
+                </Text>
+              )}
+            </td>
+            <td
+              style={{
+                padding: 12,
+                borderBottom: "1px solid #e1e3e5",
+                verticalAlign: "middle",
+              }}
+            >
+              {isEditing ? (
+                <TextField
+                  label="Comisión (%)"
+                  labelHidden
+                  value={editCommission}
+                  onChange={setEditCommission}
+                  autoComplete="off"
+                />
+              ) : (
+                `${affiliate.commissionRate}%`
+              )}
+            </td>
+            <td
+              style={{
+                padding: 12,
+                borderBottom: "1px solid #e1e3e5",
+                verticalAlign: "middle",
+              }}
+            >
+              {new Date(affiliate.createdAt).toLocaleDateString("es", {
+                day: "numeric",
+                month: "short",
+                year: "numeric",
+              })}
+            </td>
+            <td
+              style={{
+                padding: 12,
+                borderBottom: "1px solid #e1e3e5",
+                verticalAlign: "middle",
+              }}
+            >
+              <InlineStack align="space-between" blockAlign="center" gap="200">
+                <Text as="span" variant="bodySm" tone="subdued">
+                  {trackingUrl}
+                </Text>
+                <Tooltip content="Copiar link de seguimiento">
+                  <Button
+                    variant="plain"
+                    onClick={() => {
+                      void navigator.clipboard.writeText(trackingUrl);
+                    }}
+                  >
+                    Copiar
+                  </Button>
+                </Tooltip>
+              </InlineStack>
+            </td>
+            <td
+              style={{
+                padding: 12,
+                borderBottom: "1px solid #e1e3e5",
+                verticalAlign: "middle",
+              }}
+            >
+              <InlineStack gap="200">
+                {isEditing ? (
+                  <>
+                    <Button
+                      variant="primary"
+                      onClick={() => {
+                        updateFetcher.submit(
+                          {
+                            _intent: "update",
+                            id: affiliate.id,
+                            code: editCode,
+                            commissionRate: editCommission,
+                          },
+                          { method: "post" },
+                        );
+                      }}
+                      loading={updateFetcher.state !== "idle"}
+                    >
+                      Guardar
+                    </Button>
+                    <Button
+                      variant="plain"
+                      onClick={() => {
+                        setEditingId(null);
+                        setEditCode("");
+                        setEditCommission("");
+                      }}
+                    >
+                      Cancelar
+                    </Button>
+                  </>
+                ) : (
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      setEditingId(affiliate.id);
+                      setEditCode(affiliate.code);
+                      setEditCommission(String(affiliate.commissionRate));
+                    }}
+                  >
+                    Editar
+                  </Button>
+                )}
+                <Form method="post">
+                  <input type="hidden" name="_intent" value="delete" />
+                  <input type="hidden" name="id" value={affiliate.id} />
+                  <Button submit variant="tertiary" tone="critical">
+                    Eliminar
+                  </Button>
+                </Form>
+              </InlineStack>
+            </td>
+          </tr>
+        );
+      }),
+    [
+      affiliates,
+      shopDomain,
+      editingId,
+      editCode,
+      editCommission,
+      updateFetcher,
+    ],
   );
 
   return (
@@ -249,92 +377,47 @@ export default function AffiliatesPage() {
       <Card>
         <Box id="new-affiliate-card" padding="400">
           <Text variant="headingMd" as="h3">
-            {editing ? "Editar afiliado" : "Nuevo afiliado"}
+            Nuevo afiliado
           </Text>
           <Box paddingBlockStart="300">
-            {editing ? (
-              <Form method="post" key={editing.id}>
-                <input type="hidden" name="_intent" value="update" />
-                <input type="hidden" name="id" value={editing.id} />
-                <FormLayout>
-                  <InlineStack gap="400" align="start">
-                    <Box minWidth="320px">
-                      <TextField
-                        label="Código"
-                        name="code"
-                        autoComplete="off"
-                        value={editCode}
-                        onChange={setEditCode}
-                        error={actionData?.errors?.code}
-                        helpText="Se usará en enlaces ?ref=CÓDIGO"
-                      />
-                    </Box>
-                    <Box minWidth="200px">
-                      <TextField
-                        label="Comisión (%)"
-                        name="commissionRate"
-                        value={editCommission}
-                        onChange={setEditCommission}
-                        autoComplete="off"
-                        error={actionData?.errors?.commissionRate}
-                      />
-                    </Box>
-                  </InlineStack>
-                  {actionData?.errors?.form ? (
-                    <Text as="p" variant="bodyMd" tone="critical">
-                      {actionData.errors.form}
-                    </Text>
-                  ) : null}
-                  <InlineStack align="end" gap="200">
-                    <Button url="/app/affiliates" variant="tertiary">
-                      Cancelar
-                    </Button>
-                    <Button submit variant="primary">
-                      Guardar cambios
-                    </Button>
-                  </InlineStack>
-                </FormLayout>
-              </Form>
-            ) : (
-              <Form method="post">
-                <input type="hidden" name="_intent" value="create" />
-                <FormLayout>
-                  <InlineStack gap="400" align="start">
-                    <Box minWidth="320px">
-                      <TextField
-                        label="Código"
-                        name="code"
-                        autoComplete="off"
-                        value={createCode}
-                        onChange={setCreateCode}
-                        error={actionData?.errors?.code}
-                        helpText="Se usará en enlaces ?ref=CÓDIGO"
-                      />
-                    </Box>
-                    <Box minWidth="200px">
-                      <TextField
-                        label="Comisión (%)"
-                        name="commissionRate"
-                        value={createCommission}
-                        onChange={setCreateCommission}
-                        autoComplete="off"
-                        error={actionData?.errors?.commissionRate}
-                      />
-                    </Box>
-                  </InlineStack>
-                  {actionData?.errors?.form ? (
-                    <Text as="p" variant="bodyMd" tone="critical">
-                      {actionData.errors.form}
-                    </Text>
-                  ) : null}
-                  <InlineStack align="end">
-                    <Button submit variant="primary">
-                      Crear afiliado
-                    </Button>
-                  </InlineStack>
-                </FormLayout>
-              </Form>
-            )}
+            <Form method="post">
+              <input type="hidden" name="_intent" value="create" />
+              <FormLayout>
+                <InlineStack gap="400" align="start">
+                  <Box minWidth="320px">
+                    <TextField
+                      label="Código"
+                      name="code"
+                      autoComplete="off"
+                      value={createCode}
+                      onChange={setCreateCode}
+                      error={actionData?.errors?.code}
+                      helpText="Se usará en enlaces ?ref=CÓDIGO"
+                    />
+                  </Box>
+                  <Box minWidth="200px">
+                    <TextField
+                      label="Comisión (%)"
+                      name="commissionRate"
+                      value={createCommission}
+                      onChange={setCreateCommission}
+                      autoComplete="off"
+                      error={actionData?.errors?.commissionRate}
+                    />
+                  </Box>
+                </InlineStack>
+                {actionData?.errors?.form ? (
+                  <Text as="p" variant="bodyMd" tone="critical">
+                    {actionData.errors.form}
+                  </Text>
+                ) : null}
+                <InlineStack align="end">
+                  <Button submit variant="primary">
+                    Crear afiliado
+                  </Button>
+                </InlineStack>
+              </FormLayout>
+            </Form>
           </Box>
         </Box>
       </Card>
@@ -361,19 +444,68 @@ export default function AffiliatesPage() {
                   <p>Crea el primero para empezar a rastrear conversiones.</p>
                 </EmptyState>
               ) : (
-                <IndexTable
-                  itemCount={affiliates.length}
-                  headings={[
-                    { title: "Código" },
-                    { title: "Comisión (%)" },
-                    { title: "Creado el" },
-                    { title: "Acciones" },
-                  ]}
-                  selectable={false}
-                  resourceName={{ singular: "afiliado", plural: "afiliados" }}
+                <table
+                  style={{
+                    width: "100%",
+                    borderCollapse: "collapse",
+                  }}
                 >
-                  {rows}
-                </IndexTable>
+                  <thead>
+                    <tr>
+                      <th
+                        style={{
+                          padding: 12,
+                          textAlign: "left",
+                          borderBottom: "1px solid #e1e3e5",
+                          fontWeight: 600,
+                        }}
+                      >
+                        Código
+                      </th>
+                      <th
+                        style={{
+                          padding: 12,
+                          textAlign: "left",
+                          borderBottom: "1px solid #e1e3e5",
+                          fontWeight: 600,
+                        }}
+                      >
+                        Comisión (%)
+                      </th>
+                      <th
+                        style={{
+                          padding: 12,
+                          textAlign: "left",
+                          borderBottom: "1px solid #e1e3e5",
+                          fontWeight: 600,
+                        }}
+                      >
+                        Creado el
+                      </th>
+                      <th
+                        style={{
+                          padding: 12,
+                          textAlign: "left",
+                          borderBottom: "1px solid #e1e3e5",
+                          fontWeight: 600,
+                        }}
+                      >
+                        Link de seguimiento
+                      </th>
+                      <th
+                        style={{
+                          padding: 12,
+                          textAlign: "left",
+                          borderBottom: "1px solid #e1e3e5",
+                          fontWeight: 600,
+                        }}
+                      >
+                        Acciones
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>{rows}</tbody>
+                </table>
               )}
             </Box>
           </Box>
