@@ -53,7 +53,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     await billing.require({
       plans: [AFFILIATE_USAGE_PLAN],
       isTest: billingTest,
-      onFailure: async (_billingError) =>
+      onFailure: async () =>
         billing
           .request({
             plan: AFFILIATE_USAGE_PLAN,
