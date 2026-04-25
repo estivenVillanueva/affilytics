@@ -1,5 +1,5 @@
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { useLoaderData } from "react-router";
+import { useLoaderData, useSearchParams } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import {
   BlockStack,
@@ -44,7 +44,8 @@ function getRangeStartDate(range: DateRange): Date {
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
   const url = new URL(request.url);
-  const range = getDateRange(url.searchParams.get("range"));
+  const period = url.searchParams.get("period") || "30d";
+  const range = getDateRange(period);
   const startDate = getRangeStartDate(range);
   const where = { shop: session.shop, createdAt: { gte: startDate } };
 
@@ -195,11 +196,13 @@ export default function Index() {
     totalAppCommissions,
     totalAffiliateCommissions,
     currencyCode,
-    range,
     affiliateStats,
     campaignStats,
     hasCampaignReferrals,
   } = useLoaderData<typeof loader>();
+
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeRange = getDateRange(searchParams.get("period"));
 
   const formatCurrency = (value: number) =>
     new Intl.NumberFormat("es", {
@@ -236,9 +239,18 @@ export default function Index() {
                   {periodButtons.map((option) => (
                     <Button
                       key={option.range}
-                      url={`/app?range=${option.range}`}
-                      pressed={range === option.range}
-                      variant={range === option.range ? "primary" : "secondary"}
+                      pressed={activeRange === option.range}
+                      variant={activeRange === option.range ? "primary" : "secondary"}
+                      onClick={() => {
+                        setSearchParams(
+                          (prev) => {
+                            const next = new URLSearchParams(prev);
+                            next.set("period", option.range);
+                            return next;
+                          },
+                          { replace: true },
+                        );
+                      }}
                     >
                       {option.label}
                     </Button>
