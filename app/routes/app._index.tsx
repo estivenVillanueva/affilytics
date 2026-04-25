@@ -48,7 +48,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const startDate = getRangeStartDate(range);
   const where = { shop: session.shop, createdAt: { gte: startDate } };
 
-  const [aggregates, referralCount, shopResponse] = await Promise.all([
+  const [
+    aggregates,
+    referralCount,
+    shopResponse,
+    affiliates,
+    referralByAffiliate,
+    referralByCampaign,
+  ] = await Promise.all([
     prisma.referral.aggregate({
       where,
       _sum: {
@@ -68,6 +75,33 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           }
         }`,
     ),
+    prisma.affiliate.findMany({
+      where: { shop: session.shop },
+      select: { id: true, code: true, commissionRate: true },
+      orderBy: { code: "asc" },
+    }),
+    prisma.referral.groupBy({
+      by: ["affiliateId"],
+      where,
+      _sum: {
+        orderAmount: true,
+        affiliatePayoutAmount: true,
+        appServiceFeeAmount: true,
+      },
+      _count: { id: true },
+    }),
+    prisma.referral.groupBy({
+      by: ["campaignId"],
+      where: {
+        ...where,
+        campaignId: { not: null },
+      },
+      _sum: {
+        orderAmount: true,
+        affiliatePayoutAmount: true,
+      },
+      _count: { id: true },
+    }),
   ]);
 
   const shopJson = await shopResponse.json();
@@ -79,6 +113,68 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     aggregates._sum.affiliatePayoutAmount,
   );
 
+  const statsByAffiliateId = new Map(
+    referralByAffiliate.map((row) => [
+      row.affiliateId,
+      {
+        totalSales: safeNumber(row._sum.orderAmount),
+        totalPayout: safeNumber(row._sum.affiliatePayoutAmount),
+        totalAppFee: safeNumber(row._sum.appServiceFeeAmount),
+        referralCount: row._count.id,
+      },
+    ]),
+  );
+
+  const affiliateStats = affiliates.map((a) => {
+    const s = statsByAffiliateId.get(a.id);
+    return {
+      affiliateId: a.id,
+      code: a.code,
+      commissionRate: a.commissionRate,
+      totalSales: s?.totalSales ?? 0,
+      totalPayout: s?.totalPayout ?? 0,
+      totalAppFee: s?.totalAppFee ?? 0,
+      referralCount: s?.referralCount ?? 0,
+    };
+  });
+
+  const campaignIds = referralByCampaign
+    .map((row) => row.campaignId)
+    .filter((id): id is string => id != null);
+
+  const campaignsForStats =
+    campaignIds.length > 0
+      ? await prisma.campaign.findMany({
+          where: { shop: session.shop, id: { in: campaignIds } },
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+            affiliate: { select: { code: true } },
+          },
+        })
+      : [];
+
+  const campaignById = new Map(campaignsForStats.map((c) => [c.id, c]));
+
+  const campaignStats = referralByCampaign
+    .filter((row): row is (typeof row & { campaignId: string }) => row.campaignId != null)
+    .map((row) => {
+      const c = campaignById.get(row.campaignId);
+      return {
+        campaignId: row.campaignId,
+        campaignName: c?.name ?? "—",
+        campaignSlug: c?.slug ?? "—",
+        affiliateCode: c?.affiliate.code ?? "—",
+        totalSales: safeNumber(row._sum.orderAmount),
+        totalPayout: safeNumber(row._sum.affiliatePayoutAmount),
+        referralCount: row._count.id,
+      };
+    })
+    .sort((a, b) => a.campaignName.localeCompare(b.campaignName));
+
+  const hasCampaignReferrals = campaignStats.length > 0;
+
   return {
     hasReferrals: referralCount > 0,
     totalReferredSales,
@@ -86,6 +182,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     totalAffiliateCommissions,
     currencyCode,
     range,
+    affiliateStats,
+    campaignStats,
+    hasCampaignReferrals,
   };
 };
 
@@ -97,6 +196,9 @@ export default function Index() {
     totalAffiliateCommissions,
     currencyCode,
     range,
+    affiliateStats,
+    campaignStats,
+    hasCampaignReferrals,
   } = useLoaderData<typeof loader>();
 
   const formatCurrency = (value: number) =>
@@ -104,6 +206,9 @@ export default function Index() {
       style: "currency",
       currency: currencyCode,
     }).format(value);
+
+  const formatBreakdownMoney = (value: number) =>
+    `${value.toFixed(2)} US$`;
 
   const periodButtons: { label: string; range: DateRange }[] = [
     { label: "Hoy", range: "today" },
@@ -205,6 +310,312 @@ export default function Index() {
                 </Card>
               </Layout.Section>
             </Layout>
+
+            <Card>
+              <Box padding="400">
+                <Text variant="headingMd" as="h3">
+                  Desglose por afiliado
+                </Text>
+                <Box paddingBlockStart="300">
+                  {!hasReferrals ? (
+                    <EmptyState
+                      heading="Sin ventas referidas en este periodo"
+                      image="https://cdn.shopify.com/s/files/1/0262/4071/2726/files/emptystate-files.png"
+                    >
+                      <p>
+                        Cambia el rango de fechas o comparte enlaces con{" "}
+                        <code>?ref=</code> para ver resultados aquí.
+                      </p>
+                    </EmptyState>
+                  ) : (
+                    <table
+                      style={{
+                        width: "100%",
+                        borderCollapse: "collapse",
+                      }}
+                    >
+                      <thead>
+                        <tr>
+                          <th
+                            style={{
+                              padding: 12,
+                              textAlign: "left",
+                              borderBottom: "1px solid #e1e3e5",
+                              fontWeight: 600,
+                            }}
+                          >
+                            Afiliado
+                          </th>
+                          <th
+                            style={{
+                              padding: 12,
+                              textAlign: "left",
+                              borderBottom: "1px solid #e1e3e5",
+                              fontWeight: 600,
+                            }}
+                          >
+                            Código
+                          </th>
+                          <th
+                            style={{
+                              padding: 12,
+                              textAlign: "left",
+                              borderBottom: "1px solid #e1e3e5",
+                              fontWeight: 600,
+                            }}
+                          >
+                            Comisión (%)
+                          </th>
+                          <th
+                            style={{
+                              padding: 12,
+                              textAlign: "left",
+                              borderBottom: "1px solid #e1e3e5",
+                              fontWeight: 600,
+                            }}
+                          >
+                            Ventas referidas
+                          </th>
+                          <th
+                            style={{
+                              padding: 12,
+                              textAlign: "left",
+                              borderBottom: "1px solid #e1e3e5",
+                              fontWeight: 600,
+                            }}
+                          >
+                            A pagar
+                          </th>
+                          <th
+                            style={{
+                              padding: 12,
+                              textAlign: "left",
+                              borderBottom: "1px solid #e1e3e5",
+                              fontWeight: 600,
+                            }}
+                          >
+                            Pedidos
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {affiliateStats.map((row) => (
+                          <tr key={row.affiliateId}>
+                            <td
+                              style={{
+                                padding: 12,
+                                borderBottom: "1px solid #e1e3e5",
+                                verticalAlign: "middle",
+                              }}
+                            >
+                              {row.code}
+                            </td>
+                            <td
+                              style={{
+                                padding: 12,
+                                borderBottom: "1px solid #e1e3e5",
+                                verticalAlign: "middle",
+                              }}
+                            >
+                              {row.code}
+                            </td>
+                            <td
+                              style={{
+                                padding: 12,
+                                borderBottom: "1px solid #e1e3e5",
+                                verticalAlign: "middle",
+                              }}
+                            >
+                              {row.commissionRate}%
+                            </td>
+                            <td
+                              style={{
+                                padding: 12,
+                                borderBottom: "1px solid #e1e3e5",
+                                verticalAlign: "middle",
+                              }}
+                            >
+                              {formatBreakdownMoney(row.totalSales)}
+                            </td>
+                            <td
+                              style={{
+                                padding: 12,
+                                borderBottom: "1px solid #e1e3e5",
+                                verticalAlign: "middle",
+                              }}
+                            >
+                              {formatBreakdownMoney(row.totalPayout)}
+                            </td>
+                            <td
+                              style={{
+                                padding: 12,
+                                borderBottom: "1px solid #e1e3e5",
+                                verticalAlign: "middle",
+                              }}
+                            >
+                              {row.referralCount}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </Box>
+              </Box>
+            </Card>
+
+            <Card>
+              <Box padding="400">
+                <Text variant="headingMd" as="h3">
+                  Desglose por campaña
+                </Text>
+                <Box paddingBlockStart="300">
+                  {!hasCampaignReferrals ? (
+                    <EmptyState
+                      heading="Sin ventas por campaña en este periodo"
+                      image="https://cdn.shopify.com/s/files/1/0262/4071/2726/files/emptystate-files.png"
+                    >
+                      <p>
+                        Aquí verás ventas atribuidas a campañas cuando los enlaces incluyan{" "}
+                        <code>&c=</code> y el checkout guarde la campaña en el referral.
+                      </p>
+                    </EmptyState>
+                  ) : (
+                    <table
+                      style={{
+                        width: "100%",
+                        borderCollapse: "collapse",
+                      }}
+                    >
+                      <thead>
+                        <tr>
+                          <th
+                            style={{
+                              padding: 12,
+                              textAlign: "left",
+                              borderBottom: "1px solid #e1e3e5",
+                              fontWeight: 600,
+                            }}
+                          >
+                            Campaña
+                          </th>
+                          <th
+                            style={{
+                              padding: 12,
+                              textAlign: "left",
+                              borderBottom: "1px solid #e1e3e5",
+                              fontWeight: 600,
+                            }}
+                          >
+                            Slug
+                          </th>
+                          <th
+                            style={{
+                              padding: 12,
+                              textAlign: "left",
+                              borderBottom: "1px solid #e1e3e5",
+                              fontWeight: 600,
+                            }}
+                          >
+                            Afiliado
+                          </th>
+                          <th
+                            style={{
+                              padding: 12,
+                              textAlign: "left",
+                              borderBottom: "1px solid #e1e3e5",
+                              fontWeight: 600,
+                            }}
+                          >
+                            Ventas referidas
+                          </th>
+                          <th
+                            style={{
+                              padding: 12,
+                              textAlign: "left",
+                              borderBottom: "1px solid #e1e3e5",
+                              fontWeight: 600,
+                            }}
+                          >
+                            A pagar
+                          </th>
+                          <th
+                            style={{
+                              padding: 12,
+                              textAlign: "left",
+                              borderBottom: "1px solid #e1e3e5",
+                              fontWeight: 600,
+                            }}
+                          >
+                            Pedidos
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {campaignStats.map((row) => (
+                          <tr key={row.campaignId}>
+                            <td
+                              style={{
+                                padding: 12,
+                                borderBottom: "1px solid #e1e3e5",
+                                verticalAlign: "middle",
+                              }}
+                            >
+                              {row.campaignName}
+                            </td>
+                            <td
+                              style={{
+                                padding: 12,
+                                borderBottom: "1px solid #e1e3e5",
+                                verticalAlign: "middle",
+                              }}
+                            >
+                              {row.campaignSlug}
+                            </td>
+                            <td
+                              style={{
+                                padding: 12,
+                                borderBottom: "1px solid #e1e3e5",
+                                verticalAlign: "middle",
+                              }}
+                            >
+                              {row.affiliateCode}
+                            </td>
+                            <td
+                              style={{
+                                padding: 12,
+                                borderBottom: "1px solid #e1e3e5",
+                                verticalAlign: "middle",
+                              }}
+                            >
+                              {formatBreakdownMoney(row.totalSales)}
+                            </td>
+                            <td
+                              style={{
+                                padding: 12,
+                                borderBottom: "1px solid #e1e3e5",
+                                verticalAlign: "middle",
+                              }}
+                            >
+                              {formatBreakdownMoney(row.totalPayout)}
+                            </td>
+                            <td
+                              style={{
+                                padding: 12,
+                                borderBottom: "1px solid #e1e3e5",
+                                verticalAlign: "middle",
+                              }}
+                            >
+                              {row.referralCount}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </Box>
+              </Box>
+            </Card>
 
             {!hasReferrals ? (
               <Card>
