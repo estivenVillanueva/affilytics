@@ -18,42 +18,39 @@
 ## 2. Arquitectura General
 
 ```text
-┌──────────────────────────────────────────────────────────────────────────┐
-│ Shopify Admin (Embedded App UI)                                         │
-│  - /app (Dashboard)                                                     │
-│  - /app/affiliates (CRUD afiliados)                                     │
-│  - /app/campaigns (CRUD campañas)                                       │
-└───────────────┬──────────────────────────────────────────────────────────┘
-                │ authenticate.admin + loaders/actions
-                ▼
-┌──────────────────────────────────────────────────────────────────────────┐
-│ Backend React Router (Node)                                             │
-│  - app/routes/api.conversion.ts (endpoint público conversión)           │
-│  - app/services/conversion.server.ts (lógica negocio + billing usage)   │
-│  - app/services/conversion-signature.server.ts (firma/verificación)     │
-│  - app/shopify.server.ts (SDK Shopify + billing config)                 │
-└───────────────┬──────────────────────────────────────────────────────────┘
-                │ Prisma Client
-                ▼
-┌──────────────────────────────────────────────────────────────────────────┐
-│ SQLite (Prisma)                                                         │
-│  - Session                                                              │
-│  - Affiliate                                                            │
-│  - Campaign                                                             │
-│  - Referral                                                             │
-│  - Shop                                                                 │
-└───────────────▲──────────────────────────────────────────────────────────┘
-                │
-                │ POST /api/conversion (signed)
-┌───────────────┴──────────────────────────────────────────────────────────┐
-│ Storefront Extensions                                                   │
-│ 1) Theme extension (affiliate-tracker.js)                               │
-│    - Captura ?ref y ?c                                                   │
-│    - Persiste localStorage + cookie                                      │
-│ 2) Web Pixel (checkout_completed)                                        │
-│    - Lee ref/campaign + total                                            │
-│    - Firma HMAC y envía reporte al backend                               │
-└──────────────────────────────────────────────────────────────────────────┘
+
+ Shopify Admin (Embedded App UI)                                         
+  - /app (Dashboard)                                                     
+  - /app/affiliates (CRUD afiliados)                                     
+  - /app/campaigns (CRUD campañas)                                       
+
+                 authenticate.admin + loaders/actions
+                
+ Backend React Router (Node)                                             
+  - app/routes/api.conversion.ts (endpoint público conversión)           
+  - app/services/conversion.server.ts (lógica negocio + billing usage)  
+  - app/services/conversion-signature.server.ts (firma/verificación)    
+ - app/shopify.server.ts (SDK Shopify + billing config)                 
+
+                 Prisma Client
+                
+ SQLite (Prisma)                                                         
+  - Session                                                                Affiliate                                                            
+ - Campaign                                                             
+  - Referral                                                             
+  - Shop                                                                 
+
+                
+                 POST /api/conversion (signed)
+
+ Storefront Extensions                                                   
+ 1) Theme extension (affiliate-tracker.js)                               
+    - Captura ?ref y ?c                                                   
+    - Persiste localStorage + cookie                                      
+ 2) Web Pixel (checkout_completed)                                        
+    - Lee ref/campaign + total                                            
+  - Firma HMAC y envía reporte al backend                               
+
 ```
 
 ---
@@ -273,6 +270,56 @@ Pasos:
   - backoff exponencial desde `300ms`
   - logging contextual (`shop`, `orderId`, operación).
 
+### Alternativas consideradas y descartadas
+
+- **Remix vs React Router**: Remix fue considerado pero Shopify migró su 
+  template oficial a React Router v7 en 2025-2026. Usar el template oficial 
+  garantiza soporte, actualizaciones y mejor integración con el CLI.
+
+- **Webhooks vs Web Pixel para tracking**: Los webhooks de Shopify para 
+  orders/created fueron considerados pero presentan dos problemas: (1) no 
+  tienen acceso al dato del afiliado capturado client-side, y (2) requieren 
+  verificación de HMAC del lado del servidor de manera diferente. El Web Pixel 
+  accede directamente al localStorage donde está affiliate_ref, lo que lo hace 
+  la solución correcta.
+
+- **ScriptTags vs Web Pixel**: ScriptTags es legacy y Shopify lo deprecará. 
+  No tiene acceso al checkout moderno. Web Pixel es el estándar 2026.
+
+- **MongoDB vs SQLite/PostgreSQL**: MongoDB fue considerado para almacenar 
+  los reportes JSON de conversión, pero Prisma con SQLite/PostgreSQL permite 
+  usar campos JSON nativos en PostgreSQL mientras mantiene constraints 
+  relacionales críticos como @@unique([shop, orderId]) para idempotencia.
+
+### Manejo de asincronía en facturación
+
+El procesamiento de billing es intencionalmente tolerante a fallos:
+
+1. El Referral se crea primero con billingStatus="FAILED"
+2. Se intenta appUsageRecordCreate de forma asíncrona con await
+3. Si tiene éxito, se actualiza billingStatus="SUCCESS"  
+4. Si falla tras 3 reintentos, el Referral queda guardado con 
+   billingStatus="FAILED" para reconciliación posterior
+5. El endpoint siempre responde 200 OK al pixel aunque el billing falle,
+   evitando reintentos innecesarios del pixel
+
+Esta separación garantiza que nunca se pierda una conversión por un fallo 
+temporal de la Billing API de Shopify.
+
+En producción, esto evolucionaría a una cola (BullMQ/SQS) donde:
+- El endpoint encola el evento y responde 202 Accepted inmediatamente
+- Workers independientes procesan el billing con reintentos ilimitados
+- Dead letter queue para eventos que fallan repetidamente
+
+### Adaptación para alta concurrencia (Black Friday)
+
+Ver sección 12 para el plan completo. Los cambios arquitectónicos clave son:
+1. PostgreSQL con particionamiento por fecha reemplaza SQLite
+2. Cola de mensajes desacopla el billing del request HTTP
+3. Múltiples instancias stateless detrás de load balancer
+4. El constraint @@unique([shop, orderId]) garantiza idempotencia 
+   incluso con múltiples instancias procesando simultáneamente
+
 ---
 
 ## 9. Sustentación de Base de Datos
@@ -410,7 +457,7 @@ Esto evita perder el evento de conversión aunque falle el cobro, permitiendo re
 
 ## 10. Sustentación de DevOps
 
-### Gestión de Entornos (expandir)
+### Gestión de Entornos
 
 - **dev**  
   - Flujo: `shopify app dev` + tunnel dinámico + SQLite (`prisma/schema.prisma` con `provider = "sqlite"`).  
@@ -432,7 +479,17 @@ Esto evita perder el evento de conversión aunque falle el cobro, permitiendo re
 Cada entorno debe tener su propio `.env` y su propia app en Partner Dashboard.  
 Nunca compartir `SHOPIFY_API_SECRET` entre entornos.
 
-### Pipelines de CI/CD (expandir con pasos detallados para deploy seguro)
+### Estado actual vs Producción objetivo
+
+| Estado actual | Producción objetivo |
+|---|---|
+| Desarrollo local con `shopify app dev` y tunnel dinámico | Entornos separados (staging/prod) con URL fija y app distinta en Partner Dashboard |
+| SQLite en local | PostgreSQL gestionado con estrategias de escalado |
+| Billing puede omitirse en dev (`SHOPIFY_SKIP_BILLING=true`) | Billing real activo con monitoreo y reconciliación |
+| Retry inline en request de conversión | Cola + workers para desacoplar procesamiento bajo alta carga |
+| Sin endpoint dedicado de health checks | Endpoints `/health/live` y `/health/ready` integrados en CI/CD y orquestador |
+
+### Pipelines de CI/CD para despliegue seguro
 
 Actualmente existe un pipeline de verificación en `.github/workflows/ci.yml` (`lint`, `typecheck`, `build`).  
 Para un despliegue seguro a producción, se recomienda extenderlo a algo como:
@@ -487,7 +544,7 @@ Justificación por etapa:
 - **prisma validate**: detecta inconsistencias del schema antes de migrar/desplegar.
 - **health check post-deploy**: verifica que el servicio quedó operativo después de publicar y migrar.
 
-### Estrategia de Despliegue (expandir con opciones concretas)
+### Estrategia de Despliegue
 
 Existe un `Dockerfile` productivo en el repositorio:
 
@@ -569,14 +626,14 @@ Actualmente no existe doble ventana de secretos en código; la rotación debe co
 
 ### Health check
 
-Hoy no existe endpoint dedicado `/health` en `app/routes`.  
-Para producción, agregar:
-- `liveness`: respuesta HTTP simple
-- `readiness`: chequeo básico de DB/Prisma
+**Actual:** no implementado (no existe endpoint dedicado de salud en `app/routes`).  
+**Plan inmediato:** agregar endpoints:
+- `/health/live` para liveness (respuesta HTTP simple)
+- `/health/ready` para readiness (chequeo básico de DB/Prisma)
 
 ---
 
-## 10.5 Manejo de Throttling GraphQL y Git Flow
+## 11. Manejo de Throttling GraphQL y Git Flow
 
 ### Manejo de Throttling (Rate Limits Shopify GraphQL)
 
@@ -629,7 +686,7 @@ Conventional commits recomendados:
 
 ---
 
-## 11. Seguridad
+## 12. Seguridad
 
 Medidas implementadas actualmente:
 
@@ -650,7 +707,7 @@ Medidas implementadas actualmente:
 
 ---
 
-## 12. Escalabilidad Teórica
+## 13. Escalabilidad Teórica
 
 Para soportar 1,000+ tiendas y picos Black Friday:
 
@@ -667,7 +724,7 @@ Para soportar 1,000+ tiendas y picos Black Friday:
 
 ---
 
-## 13. Limitaciones Conocidas en Desarrollo
+## 14. Limitaciones Conocidas en Desarrollo
 
 1. **URL del tunnel cambia al reiniciar**  
    Debes actualizar `conversionApiUrl` del Web Pixel (GraphiQL `webPixelUpdate`) cada vez que cambie.
