@@ -1,11 +1,11 @@
 -- DropIndex
-DROP INDEX "Campaign_affiliateId_idx";
+DROP INDEX IF EXISTS "Campaign_affiliateId_idx";
 
 -- DropIndex
-DROP INDEX "Campaign_shop_idx";
+DROP INDEX IF EXISTS "Campaign_shop_idx";
 
 -- DropIndex
-DROP INDEX "Campaign_shop_slug_key";
+DROP INDEX IF EXISTS "Campaign_shop_slug_key";
 
 -- DropTable
 PRAGMA foreign_keys=off;
