@@ -113,91 +113,51 @@ Además, el runtime Shopify requiere variables típicas de OAuth/SDK (inyectadas
 
 ---
 
-## 5. ⚠️ Configuración del Web Pixel (LEER ANTES DE PROBAR)
+### a) Crear pixel por primera vez
 
-### Por qué se rompe tras reiniciar `shopify app dev`
-
-El tunnel (Cloudflare/CLI) cambia de dominio al reiniciar.  
-El Web Pixel guarda `conversionApiUrl` en su configuración; si esa URL queda vieja, el `fetch` del pixel fallará.
-
-### Qué hacer cada vez que cambia la URL
-
-Actualizar settings del pixel en Admin GraphQL (GraphiQL app).
-
-### a) Crear pixel por primera vez (`webPixelCreate`)
+Abre GraphiQL en `http://localhost:3457/graphiql` y ejecuta:
 
 ```graphql
-mutation webPixelCreate($settings: JSON!) {
-  webPixelCreate(webPixel: { settings: $settings }) {
-    userErrors {
-      field
-      message
-    }
+mutation {
+  webPixelCreate(webPixel: {
+    settings: "{\"conversionApiUrl\":\"https://TU-TUNNEL.trycloudflare.com/api/conversion\",\"conversionSharedSecret\":\"change_me_to_match_pixel_settings_min_16_chars\",\"conversionApiKey\":\"supersecretkey\"}"
+  }) {
     webPixel {
       id
       settings
     }
-  }
-}
-```
-
-Variables:
-
-```json
-{
-  "settings": {
-    "conversionApiUrl": "https://<TU_TUNNEL_ACTUAL>/api/conversion",
-    "conversionSharedSecret": "<CONVERSION_WEBHOOK_SECRET>",
-    "conversionApiKey": "<CONVERSION_API_KEY_OPCIONAL>"
-  }
-}
-```
-
-### b) Actualizar pixel en cada restart (`webPixelUpdate`)
-
-Primero obtén el `id`:
-
-```graphql
-query {
-  webPixel {
-    id
-    settings
-  }
-}
-```
-
-Luego actualiza:
-
-```graphql
-mutation webPixelUpdate($id: ID!, $settings: JSON!) {
-  webPixelUpdate(id: $id, webPixel: { settings: $settings }) {
     userErrors {
       field
       message
     }
+  }
+}
+```
+
+Guarda el `id` que retorna, lo necesitarás para actualizaciones.
+
+### b) Actualizar pixel en cada restart
+
+```graphql
+mutation {
+  webPixelUpdate(id: "gid://shopify/WebPixel/TU_PIXEL_ID", webPixel: {
+    settings: "{\"conversionApiUrl\":\"https://TU-TUNNEL-NUEVO.trycloudflare.com/api/conversion\",\"conversionSharedSecret\":\"change_me_to_match_pixel_settings_min_16_chars\",\"conversionApiKey\":\"supersecretkey\"}"
+  }) {
     webPixel {
       id
       settings
+    }
+    userErrors {
+      field
+      message
     }
   }
 }
 ```
 
-Variables:
-
-```json
-{
-  "id": "gid://shopify/WebPixel/<ID>",
-  "settings": {
-    "conversionApiUrl": "https://<TU_TUNNEL_ACTUAL>/api/conversion",
-    "conversionSharedSecret": "<CONVERSION_WEBHOOK_SECRET>",
-    "conversionApiKey": "<CONVERSION_API_KEY_OPCIONAL>"
-  }
-}
-```
-
-> Los nombres de settings están definidos en `extensions/affiliate-pixel/shopify.extension.toml`:  
-> `conversionApiUrl`, `conversionSharedSecret`, `conversionApiKey`.
+Reemplaza:
+- `TU-TUNNEL-NUEVO.trycloudflare.com` → la URL que aparece en tu terminal
+- `TU_PIXEL_ID` → el ID del pixel (ej: `2088337494`)
 
 ---
 
