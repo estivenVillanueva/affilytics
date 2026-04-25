@@ -100,7 +100,16 @@ npm run dev
 - `SHOPIFY_REQUIRE_BILLING`  
   `true` para forzar billing en dev (si no se está omitiendo).
 - `SHOPIFY_BILLING_TEST`  
-  `true` para generar cargos de prueba.
+  `true` para generar cargos de prueba. 
+
+  ejemplo 
+
+  SHOPIFY_APP_URL=(la url del tunel es la que da app_home  Using URL )
+  CONVERSION_API_KEY=supersecretkey
+  CONVERSION_WEBHOOK_SECRET=change_me_to_match_pixel_settings_min_16_chars
+  SHOPIFY_SKIP_BILLING=true
+  SHOPIFY_REQUIRE_BILLING=false
+  SHOPIFY_BILLING_TEST=true
 
 Además, el runtime Shopify requiere variables típicas de OAuth/SDK (inyectadas por CLI o entorno):  
 `SHOPIFY_API_KEY`, `SHOPIFY_API_SECRET`, `SCOPES` (ver `app/shopify.server.ts`).
@@ -134,7 +143,7 @@ mutation {
 }
 ```
 
-Guarda el `id` que retorna, lo necesitarás para actualizaciones.
+Guarda el `id` que retorna, lo necesitarás para actualizaciones ya que recuerda siempre que reinicies el servidor tienes que actualizar la ruta del tunel.
 
 ### b) Actualizar pixel en cada restart
 
